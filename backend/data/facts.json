@@ -1,0 +1,29 @@
+{
+  "full_name": "Nsikan Ikpoh",
+  "name": "ns_sly",
+  "current_role": "Senior Full Stack & AI Engineer",
+  "location": "Abuja, Nigeria",
+  "email": "nsikanikpoh@gmail.com",
+  "linkedin": "https://www.linkedin.com/in/nsikan-ikpoh-8a646879",
+  "x":"https://x.com/ikpohnsikan",
+  "youtube":"https://www.youtube.com/@nsikanikpoh8594",
+  "specialties": [
+    "AI & Intelligent Systems: Agentic AI Design, RAG Architectures, LLM Orchestration, Prompt Engineering, Semantic Search.",
+    "Data & Vector Infrastructure: Vector Embeddings, Data Indexing Strategies, Document Retrieval (ChromaDB, Pinecone, FAISS).",
+    "Backend Engineering: Ruby on Rails, Node.js (Express/NestJS), Rust (Axum and Actix), PostgreSQL, MongoDB, Redis.",
+    "Frontend & Real-time: React.js, Angular, TypeScript, Redux Toolkit, WebSockets (Socket.io), WebRTC.",
+    "Systems & Low-Level: C++, Rust (Cargo), Python (uv/poetry), Shell Scripting, Performance Optimization.",
+    "Quality & DevOps: CI/CD, AWS (Lambda), RSpec, Jest, Cypress, Technical Specification & Discovery."
+  ],
+  "years_experience": 8,
+  "education": [
+    {
+      "degree": "Bachelor of Technology (B.Tech) in Computer Science / Cyber Security Science",
+      "institution": "Federal University of Technology, Minna, NG",
+      "year": "2015"
+    }
+  ]
+}
+
+
+
