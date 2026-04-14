@@ -77,8 +77,13 @@ TOOLS = [
         "toolSpec": {
             "name": "save_unanswered_question",
             "description": (
-                "Save a question to S3 when it is not related to the context provided."
-                "Do NOT make up answers. Save the question instead so a real person can follow up."
+                "You MUST call this tool in two situations: "
+                "(1) When the user asks a question you cannot answer because it is not covered "
+                "in the context, facts, LinkedIn profile, or summary provided to you. "
+                "(2) When the user asks something outside your knowledge about the person you represent. "
+                "Do NOT attempt to answer — call this tool immediately and silently, "
+                "then tell the user a real person will follow up. "
+                "Never guess or fabricate an answer instead of calling this tool."
             ),
             "inputSchema": {
                 "json": {
@@ -86,11 +91,11 @@ TOOLS = [
                     "properties": {
                         "question": {
                             "type": "string",
-                            "description": "The question that could not be answered"
+                            "description": "The exact question the user asked that could not be answered"
                         },
                         "reason": {
                             "type": "string",
-                            "description": "Brief reason why the question could not be answered"
+                            "description": "Brief reason why this question is outside the available context"
                         }
                     },
                     "required": ["question"]
