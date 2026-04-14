@@ -40,6 +40,68 @@ USE_S3 = os.getenv("USE_S3", "false").lower() == "true"
 S3_BUCKET = os.getenv("S3_BUCKET", "")
 MEMORY_DIR = os.getenv("MEMORY_DIR", "../memory")
 
+# S3 prefixes
+S3_PREFIX_CONVERSATIONS = "conversations/"
+S3_PREFIX_CONTACTS      = "contacts/"
+S3_PREFIX_UNANSWERED    = "unanswered/"
+
+#Tools
+TOOLS = [
+    {
+        "toolSpec": {
+            "name": "save_contact",
+            "description": (
+                "Save a visitor's contact information when they share their email address "
+                "in the conversation. Call this automatically as soon as the user provides "
+                "their email and do not ask for confirmation."
+            ),
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "email": {
+                            "type": "string",
+                            "description": "The visitor's email address"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "The visitor's name if mentioned in the conversation"
+                        }
+                    },
+                    "required": ["email"]
+                }
+            }
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "save_unanswered_question",
+            "description": (
+                "Save a question to S3 when you do not have enough information to answer it "
+                "confidently. Call this when you cannot answer based on the context provided. "
+                "Do NOT make up answers. Save the question instead so a real person can follow up."
+            ),
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question that could not be answered"
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Brief reason why the question could not be answered"
+                        }
+                    },
+                    "required": ["question"]
+                }
+            }
+        }
+    }
+]
+
+
 # Initialize S3 client if needed
 if USE_S3:
     s3_client = boto3.client("s3")
@@ -71,7 +133,7 @@ def load_conversation(session_id: str) -> List[Dict]:
     """Load conversation history from storage"""
     if USE_S3:
         try:
-            response = s3_client.get_object(Bucket=S3_BUCKET, Key=get_memory_path(session_id))
+            response = s3_client.get_object(Bucket=S3_BUCKET, Key=f"{S3_PREFIX_CONVERSATIONS}{get_memory_path(session_id)}")
             return json.loads(response["Body"].read().decode("utf-8"))
         except ClientError as e:
             if e.response["Error"]["Code"] == "NoSuchKey":
@@ -91,7 +153,8 @@ def save_conversation(session_id: str, messages: List[Dict]):
     if USE_S3:
         s3_client.put_object(
             Bucket=S3_BUCKET,
-            Key=get_memory_path(session_id),
+            Key=f"{S3_PREFIX_CONVERSATIONS}{get_memory_path(session_id)}",
+
             Body=json.dumps(messages, indent=2),
             ContentType="application/json",
         )
@@ -102,10 +165,79 @@ def save_conversation(session_id: str, messages: List[Dict]):
         with open(file_path, "w") as f:
             json.dump(messages, f, indent=2)
 
+def execute_save_contact(inputs: Dict, session_id: str) -> str:
+    email = inputs.get("email", "").strip()
+    name  = inputs.get("name", "").strip()
 
-def call_bedrock(conversation: List[Dict], user_message: str) -> str:
-    """Call AWS Bedrock with conversation history"""
+    if not email or "@" not in email:
+        return "Invalid email address — contact not saved."
+
+    contact = {
+        "email":      email,
+        "name":       name,
+        "session_id": session_id,
+        "saved_at":   datetime.now().isoformat(),
+    }
+
+    key = f"{S3_PREFIX_CONTACTS}{get_memory_path(session_id)}"
+
+    try:
+        s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=key,
+            Body=json.dumps(contact, indent=2),
+            ContentType="application/json",
+        )
+        print(f"[Tool] Contact saved: {email}")
+        return f"Contact saved successfully for {email}."
+    except ClientError as e:
+        print(f"[Tool] Failed to save contact: {e}")
+        return "Failed to save contact due to a storage error."
+
+
+def execute_save_unanswered(inputs: Dict, session_id: str) -> str:
+    question = inputs.get("question", "").strip()
+    reason   = inputs.get("reason", "No reason provided").strip()
+
+    if not question:
+        return "No question provided — nothing saved."
+
+    record = {
+        "question":   question,
+        "reason":     reason,
+        "session_id": session_id,
+        "timestamp":  datetime.now().isoformat(),
+    }
+
+    key = f"{S3_PREFIX_UNANSWERED}{get_memory_path(session_id)}"
+
+    try:
+        s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=key,
+            Body=json.dumps(record, indent=2),
+            ContentType="application/json",
+        )
+        print(f"[Tool] Unanswered question saved for session {session_id}: {question}")
+        return "Question saved. A real person will follow up."
+    except ClientError as e:
+        print(f"[Tool] Failed to save unanswered question: {e}")
+        return "Failed to save the question due to a storage error."
+
+
+def dispatch_tool(tool_name: str, tool_input: Dict, session_id: str) -> str:
+    """Route tool call from Bedrock to the correct function."""
+    if tool_name == "save_contact":
+        return execute_save_contact(tool_input, session_id)
+    elif tool_name == "save_unanswered_question":
+        return execute_save_unanswered(tool_input, session_id)
+    else:
+        return f"Unknown tool: {tool_name}"
     
+
+def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -> str:
+    """Call AWS Bedrock with conversation history and tool support. Runs agentic loop"""
+  
     # Build messages in Bedrock format
     messages = []
     
@@ -130,19 +262,68 @@ def call_bedrock(conversation: List[Dict], user_message: str) -> str:
     })
     
     try:
-        # Call Bedrock using the converse API
-        response = bedrock_client.converse(
-            modelId=BEDROCK_MODEL_ID,
-            messages=messages,
-            inferenceConfig={
-                "maxTokens": 2000,
-                "temperature": 0.7,
-                "topP": 0.9
-            }
-        )
-        
-        # Extract the response text
-        return response["output"]["message"]["content"][0]["text"]
+        # Call Bedrock using the converse API in Agentic tool loop to  request multiple tool calls before giving a final response.
+        while True:
+            response = bedrock_client.converse(
+                modelId=BEDROCK_MODEL_ID,
+                messages=messages,
+                toolConfig={"tools": TOOLS},
+                inferenceConfig={
+                    "maxTokens": 2000,
+                    "temperature": 0.7,
+                    "topP": 0.9
+                }
+            )
+
+            stop_reason      = response["stopReason"]
+            response_message = response["output"]["message"]
+
+            # Add model's response to messages for context continuity
+            messages.append(response_message)
+
+            if stop_reason == "end_turn":
+                # Model produced a final text response, extract and return it
+                for block in response_message["content"]:
+                    if "text" in block:
+                        return block["text"]
+                return "I'm sorry, I couldn't generate a response."
+
+            elif stop_reason == "tool_use":
+                # Model wants to call one or more tools, execute each and feed results back
+                tool_results = []
+
+                for block in response_message["content"]:
+                    if block.get("type") != "tool_use" and "toolUseId" not in block:
+                        continue
+
+                    tool_name   = block.get("name")
+                    tool_input  = block.get("input", {})
+                    tool_use_id = block.get("toolUseId")
+
+                    print(f"[Bedrock] Tool called: {tool_name} | input: {tool_input}")
+
+                    result = dispatch_tool(tool_name, tool_input, session_id)
+
+                    tool_results.append({
+                        "toolResult": {
+                            "toolUseId": tool_use_id,
+                            "content":   [{"text": result}],
+                            "status":    "success"
+                        }
+                    })
+
+                # Feed tool results back to model as a user turn
+                messages.append({
+                    "role":    "user",
+                    "content": tool_results
+                })
+
+            else:
+                # Unexpected stop reason
+                print(f"[Bedrock] Unexpected stopReason: {stop_reason}")
+                break
+
+        return "I'm sorry, something went wrong generating a response."
         
     except ClientError as e:
         error_code = e.response['Error']['Code']
@@ -187,7 +368,7 @@ async def chat(request: ChatRequest):
         conversation = load_conversation(session_id)
 
         # Call Bedrock for response
-        assistant_response = call_bedrock(conversation, request.message)
+        assistant_response = call_bedrock(conversation, request.message, session_id)
 
         # Update conversation history
         conversation.append(
@@ -222,6 +403,35 @@ async def get_conversation(session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/unanswered")
+async def list_unanswered():
+    """List all unanswered questions saved in S3 for human review."""
+    try:
+        response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=S3_PREFIX_UNANSWERED)
+        items = []
+        for obj in response.get("Contents", []):
+            file = s3_client.get_object(Bucket=S3_BUCKET, Key=obj["Key"])
+            items.append(json.loads(file["Body"].read().decode("utf-8")))
+        items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        return {"count": len(items), "questions": items}
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/contacts")
+async def list_contacts():
+    """List all saved contacts from S3."""
+    try:
+        response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=S3_PREFIX_CONTACTS)
+        contacts = []
+        for obj in response.get("Contents", []):
+            file = s3_client.get_object(Bucket=S3_BUCKET, Key=obj["Key"])
+            contacts.append(json.loads(file["Body"].read().decode("utf-8")))
+        contacts.sort(key=lambda x: x.get("saved_at", ""), reverse=True)
+        return {"count": len(contacts), "contacts": contacts}
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 
 if __name__ == "__main__":
     import uvicorn
