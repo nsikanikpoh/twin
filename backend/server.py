@@ -77,8 +77,7 @@ TOOLS = [
         "toolSpec": {
             "name": "save_unanswered_question",
             "description": (
-                "Save a question to S3 when you do not have enough information to answer it "
-                "confidently. Call this when you cannot answer based on the context provided. "
+                "Save a question to S3 when you cannot answer based on the context provided. "
                 "Do NOT make up answers. Save the question instead so a real person can follow up."
             ),
             "inputSchema": {
