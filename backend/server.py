@@ -179,7 +179,7 @@ def execute_save_contact(inputs: Dict, session_id: str) -> str:
         "saved_at":   datetime.now().isoformat(),
     }
 
-    key = f"{S3_PREFIX_CONTACTS}{get_memory_path(session_id)}"
+     key = f"{S3_PREFIX_CONTACTS}{email.replace('@', '_at_').replace('.', '_')}.json"
 
     try:
         s3_client.put_object(
@@ -209,7 +209,8 @@ def execute_save_unanswered(inputs: Dict, session_id: str) -> str:
         "timestamp":  datetime.now().isoformat(),
     }
 
-    key = f"{S3_PREFIX_UNANSWERED}{get_memory_path(session_id)}"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    key = f"{S3_PREFIX_UNANSWERED}{timestamp}_{session_id[:8]}.json"
 
     try:
         s3_client.put_object(
@@ -241,13 +242,6 @@ def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -
     # Build messages in Bedrock format
     messages = []
     
-    # Add system prompt as first user message
-    # Or there's a better way to do this - pass in system=[{"text": prompt()}] to the converse call below
-    messages.append({
-        "role": "user", 
-        "content": [{"text": f"System: {prompt()}"}]
-    })
-    
     # Add conversation history (limit to last 25 exchanges)
     for msg in conversation[-50:]:
         messages.append({
@@ -267,6 +261,7 @@ def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -
             response = bedrock_client.converse(
                 modelId=BEDROCK_MODEL_ID,
                 messages=messages,
+                system=[{"text": prompt()}],
                 toolConfig={"tools": TOOLS},
                 inferenceConfig={
                     "maxTokens": 2000,
@@ -293,7 +288,7 @@ def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -
                 tool_results = []
 
                 for block in response_message["content"]:
-                    if block.get("type") != "tool_use" and "toolUseId" not in block:
+                    if block.get("type") != "tool_use":
                         continue
 
                     tool_name   = block.get("name")
