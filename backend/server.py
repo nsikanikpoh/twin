@@ -284,7 +284,6 @@ def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -
                 return "I'm sorry, I couldn't generate a response."
 
             elif stop_reason == "tool_use":
-                # Model wants to call one or more tools, execute each and feed results back
                 tool_results = []
 
                 for block in response_message["content"]:
@@ -307,16 +306,16 @@ def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -
                         }
                     })
 
-                # Feed tool results back to model as a user turn
-                messages.append({
-                    "role":    "user",
-                    "content": tool_results
-                })
-
-            else:
-                # Unexpected stop reason
-                print(f"[Bedrock] Unexpected stopReason: {stop_reason}")
-                break
+                #  Only append if wehave results, empty content causes ValidationException
+                if tool_results:
+                    messages.append({
+                        "role":    "user",
+                        "content": tool_results
+                    })
+                else:
+                    # Model said tool_use but sent no tool_use blocks — log and break to avoid infinite loop
+                    print(f"[Bedrock] stop_reason=tool_use but no tool blocks found in content: {response_message['content']}")
+                    break
 
         return "I'm sorry, something went wrong generating a response."
         
