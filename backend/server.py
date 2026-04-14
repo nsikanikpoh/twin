@@ -238,25 +238,23 @@ def dispatch_tool(tool_name: str, tool_input: Dict, session_id: str) -> str:
 
 def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -> str:
     """Call AWS Bedrock with conversation history and tool support. Runs agentic loop"""
-  
-    # Build messages in Bedrock format
+
     messages = []
-    
+
     # Add conversation history (limit to last 25 exchanges)
     for msg in conversation[-50:]:
         messages.append({
             "role": msg["role"],
             "content": [{"text": msg["content"]}]
         })
-    
+
     # Add current user message
     messages.append({
         "role": "user",
         "content": [{"text": user_message}]
     })
-    
+
     try:
-        # Call Bedrock using the converse API in Agentic tool loop to  request multiple tool calls before giving a final response.
         while True:
             response = bedrock_client.converse(
                 modelId=BEDROCK_MODEL_ID,
@@ -273,11 +271,9 @@ def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -
             stop_reason      = response["stopReason"]
             response_message = response["output"]["message"]
 
-            # Add model's response to messages for context continuity
             messages.append(response_message)
 
             if stop_reason == "end_turn":
-                # Model produced a final text response, extract and return it
                 for block in response_message["content"]:
                     if "text" in block:
                         return block["text"]
@@ -287,12 +283,14 @@ def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -
                 tool_results = []
 
                 for block in response_message["content"]:
-                    if block.get("type") != "tool_use":
+                   
+                    tool_data = block.get("toolUse")
+                    if not tool_data:
                         continue
 
-                    tool_name   = block.get("name")
-                    tool_input  = block.get("input", {})
-                    tool_use_id = block.get("toolUseId")
+                    tool_name   = tool_data.get("name")
+                    tool_input  = tool_data.get("input", {})
+                    tool_use_id = tool_data.get("toolUseId")
 
                     print(f"[Bedrock] Tool called: {tool_name} | input: {tool_input}")
 
@@ -306,23 +304,25 @@ def call_bedrock(conversation: List[Dict], user_message: str, session_id: str) -
                         }
                     })
 
-                #  Only append if wehave results, empty content causes ValidationException
+                # Only append if we have results — empty content causes ValidationException
                 if tool_results:
                     messages.append({
                         "role":    "user",
                         "content": tool_results
                     })
                 else:
-                    # Model said tool_use but sent no tool_use blocks — log and break to avoid infinite loop
                     print(f"[Bedrock] stop_reason=tool_use but no tool blocks found in content: {response_message['content']}")
                     break
 
+            else:
+                print(f"[Bedrock] Unexpected stopReason: {stop_reason}")
+                break
+
         return "I'm sorry, something went wrong generating a response."
-        
+
     except ClientError as e:
         error_code = e.response['Error']['Code']
         if error_code == 'ValidationException':
-            # Handle message format issues
             print(f"Bedrock validation error: {e}")
             raise HTTPException(status_code=400, detail="Invalid message format for Bedrock")
         elif error_code == 'AccessDeniedException':
