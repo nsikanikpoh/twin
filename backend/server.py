@@ -179,7 +179,7 @@ def execute_save_contact(inputs: Dict, session_id: str) -> str:
         "saved_at":   datetime.now().isoformat(),
     }
 
-     key = f"{S3_PREFIX_CONTACTS}{email.replace('@', '_at_').replace('.', '_')}.json"
+    key = f"{S3_PREFIX_CONTACTS}{email.replace('@', '_at_').replace('.', '_')}.json"
 
     try:
         s3_client.put_object(
